@@ -67,21 +67,21 @@ class EMA:
                 param.data = self.original[name]
 
 
-def MLP(channels):
+def MLP(channels):      # create a {len(channels) - 1} layers MLP
     return Sequential(*[
         Sequential(Linear(channels[i - 1], channels[i]), SiLU())
         for i in range(1, len(channels))])
 
 
-class Res(nn.Module):
+class Res(nn.Module):       # Residual module (MLP + skip connetion)
     def __init__(self, dim):
         super(Res, self).__init__()
 
-        self.mlp = MLP([dim, dim, dim])
+        self.mlp = MLP([dim, dim, dim])     # Two-layers MLP
 
     def forward(self, m):
         m1 = self.mlp(m)
-        m_out = m1 + m
+        m_out = m1 + m      # Skip connection
         return m_out
 
 

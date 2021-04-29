@@ -117,6 +117,7 @@ class Local_MP(torch.nn.Module):
 
         # Aggregation
         m = self.lin_rbf_out(rbf) * m
+        # src = m, index = i, dim=0 (row), dim_size = h.size(0)
         h = scatter(m, i, dim=0, dim_size=h.size(0), reduce='add')
         
         # Update function f_u

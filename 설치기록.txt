@@ -1,0 +1,20 @@
+torch ver 1.7.1 설치 (https://pytorch.org/get-started/previous-versions/)
+    1) conda install pytorch==1.7.1 torchvision==0.8.2 torchaudio==0.7.2 cudatoolkit=11.0 -c pytorch
+    
+pytorch geometric 맞는 버전 설치. torch1.7, cuda 11.0, --trusted-host=pytorch
+    1) pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-1.7.0+cu110.html --trusted-host=pytorch-geometric.com
+    2) pip install torch-sparse -f https://pytorch-geometric.com/whl/torch-1.7.0+cu110.html --trusted-host=pytorch-geometric.com
+    3) pip install torch-cluster -f https://pytorch-geometric.com/whl/torch-1.7.0+cu110.html --trusted-host=pytorch-geometric.com
+    4) pip install torch-spline-conv -f https://pytorch-geometric.com/whl/torch-1.7.0+cu110.html --trusted-host=pytorch-geometric.com
+    5) pip install torch-geometric
+    
+git 설치
+
+Mxmnet req.txt 아래와 같이 수정
+
+numpy==1.17.2
+scikit-learn==0.21.3
+scipy==1.3.1
+sympy==1.6
+torchvision==0.8.2
+git+https://github.com/ildoonet/pytorch-gradual-warmup-lr.git

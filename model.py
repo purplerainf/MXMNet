@@ -23,11 +23,11 @@ class MXMNet(nn.Module):
     def __init__(self, config: Config, num_spherical=7, num_radial=6, envelope_exponent=5):
         super(MXMNet, self).__init__()
 
-        self.dim = config.dim
+        self.dim = config.dim           # Size of each hidden layer
         self.n_layer = config.n_layer
         self.cutoff = config.cutoff
 
-        self.embeddings = nn.Parameter(torch.ones((5, self.dim)))
+        self.embeddings = nn.Parameter(torch.ones((5, self.dim)))     # dim = 128 by default
 
         self.rbf_l = BesselBasisLayer(16, 3.6179, envelope_exponent)
         self.rbf_g = BesselBasisLayer(16, self.cutoff, envelope_exponent)
@@ -58,11 +58,11 @@ class MXMNet(nn.Module):
 
         value = torch.arange(row.size(0), device=row.device)
         adj_t = SparseTensor(row=col, col=row, value=value,
-                             sparse_sizes=(num_nodes, num_nodes))
+                             sparse_sizes=(num_nodes, num_nodes))   # Adjacency matrix. matrix size is E, E?
         
         #Compute the node indices for two-hop angles
         adj_t_row = adj_t[row]
-        num_triplets = adj_t_row.set_value(None).sum(dim=1).to(torch.long)
+        num_triplets = adj_t_row.set_value(None).sum(dim=1).to(torch.long)  # Initialize?
 
         idx_i = col.repeat_interleave(num_triplets)
         idx_j = row.repeat_interleave(num_triplets)
@@ -87,17 +87,31 @@ class MXMNet(nn.Module):
         return idx_i_1, idx_j, idx_k, idx_kj, idx_ji_1, idx_i_2, idx_j1, idx_j2, idx_jj, idx_ji_2
 
 
+    # x = [[ 0.2313,  1.4787, -0.1661,  0.0000],
+    #      [-0.0856,  0.0065,  0.1224,  0.0000],
+    #      [ 0.5495, -0.5127,  1.3813,  0.0000],
+    #      [ 0.5434,  0.1143,  2.7720,  0.0000],
+    #      [ 1.7929, -0.7493,  2.9961,  0.0000],
+    #      [ 1.2993, -2.2159,  2.9720,  0.0000],
+    #      [ 0.2256, -2.6210,  3.7879,  3.0000],
+    #      [ 0.9802, -1.9376,  1.5250,  0.0000],
+    #      [ 2.0224, -0.8379,  1.4553,  2.0000],
+    #      [ 1.3124,  1.6347, -0.2275,  1.0000]],
+    # edge_index = ([[   0,    0,    0,  ..., 2338, 2339, 2340],
+    #                [   1,    9,   10,  ..., 2332, 2333, 2333]]
     def forward(self, x, edge_index, batch):
         x = x.unsqueeze(-1) if x.dim() == 1 else x
         # Initialize node embeddings
-        h = torch.index_select(self.embeddings, 0, x[:,-1].long())
+        # x[:-1] contains atomic numbers
+        h = torch.index_select(self.embeddings, 0, x[:,-1].long())  # From self.embedding tensor (5, dim), return a new tensor with selected rows by x[:, -1] <-- 0, 1, 2, or 3
+
         # Get the 3D positions of atoms
         pos = x[:,:3].contiguous()
 
         # Get the edges and pairwise distances in the local layer
-        edge_index_l, _ = remove_self_loops(edge_index)
+        edge_index_l, _ = remove_self_loops(edge_index)         # edge_index_l comes from given edge_index
         j_l, i_l = edge_index_l
-        dist_l = (pos[i_l] - pos[j_l]).pow(2).sum(dim=-1).sqrt()
+        dist_l = (pos[i_l] - pos[j_l]).pow(2).sum(dim=-1).sqrt()    # Euclidean distance between nodes, in local graph
 
 
         ''' In the future version, the geometric information in the global layer 
@@ -106,13 +120,13 @@ class MXMNet(nn.Module):
         
         # Get the edges pairwise distances in the global layer
         row, col = radius(pos, pos, self.cutoff, batch, batch, max_num_neighbors=500)
-        edge_index_g = torch.stack([row, col], dim=0)
+        edge_index_g = torch.stack([row, col], dim=0)           # edge_index_g is generated from radius function, not from the input (edge_index)
         edge_index_g, _ = remove_self_loops(edge_index_g)
         j_g, i_g = edge_index_g
         dist_g = (pos[i_g] - pos[j_g]).pow(2).sum(dim=-1).sqrt()
         
         # Compute the node indices for defining the angles
-        idx_i_1, idx_j, idx_k, idx_kj, idx_ji, idx_i_2, idx_j1, idx_j2, idx_jj, idx_ji_2 = self.indices(edge_index_l, num_nodes=h.size(0))
+        idx_i_1, idx_j, idx_k, idx_kj, idx_ji, idx_i_2, idx_j1, idx_j2, idx_jj, idx_ji_2 = self.indices(edge_index_l, num_nodes=h.size(0))  # input is edge_index_l, which is the real edges
 
         # Compute the two-hop angles
         pos_ji_1, pos_kj = pos[idx_j] - pos[idx_i_1], pos[idx_k] - pos[idx_j]
