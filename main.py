@@ -26,7 +26,7 @@ parser.add_argument('--n_layer', type=int, default=6, help='Number of hidden lay
 parser.add_argument('--dim', type=int, default=128, help='Size of input hidden units.')
 parser.add_argument('--dataset', type=str, default="QM9", help='Dataset')
 parser.add_argument('--batch_size', type=int, default=128, help='Batch size')
-parser.add_argument('--target', type=int, default="7", help='Index of target (0~11) for prediction')
+parser.add_argument('--target', type=str, default="2,3", help='Index of target (0~11) for prediction. Comma-separated for multitask learning.')
 parser.add_argument('--cutoff', type=float, default=5.0, help='Distance cutoff used in the global layer')
 
 args = parser.parse_args()
@@ -74,44 +74,29 @@ class TableDataset(InMemoryDataset):
         return ['data.pt']
 
     def process(self):
-        with open(self.input_file_path, 'r') as fin:
-            smiles_list = fin.readlines()
-
-            if self.header:
-                header_line = smiles_list.pop(0).strip().split(self.sep)
-                smiles_idx = find_str_or_int_from_list(self.col_smiles, header_line)
-                y_idx = find_str_or_int_from_list(self.col_y, header_line)
-                assert 0 <= smiles_idx < len(header_line), f'Cannot find SMILES in header: {self.col_smiles}'
-                assert 0 <= y_idx < len(header_line), f'Cannot find Y in header: {self.col_y}'
-            else:
-                assert isinstance(self.col_smiles, int), f'Column info must be an integer when no header line.'
-                assert isinstance(self.col_y, int), f'Column info must be an integer when no header line.'
-                assert 0 <= self.col_smiles < len(smiles_list[0].split(self.sep)), f'Invalid column info: {self.col_smiles}'
-                assert 0 <= self.col_y < len(smiles_list[0].split(self.sep)), f'Invalid column info: {self.col_y}'
-
-            for line in smiles_list:
-                token = line.strip().split('\t')
-                print(token[smiles_idx])
-                mol = Chem.MolFromSmiles(token[smiles_idx])
-                node_attr, edge_index, edge_attr = mol2graph(mol)
-
-                self.data_list.append(Data(x=torch.tensor(node_attr, dtype=torch.float),
-                                           edge_index=torch.tensor(edge_index, dtype=torch.long).t().contiguous(),
-                                           edge_attr=torch.tensor(edge_attr, dtype=torch.float),
-                                           y=torch.tensor([float(token[y_idx])], dtype=torch.float)))
-
-        self.data, self.slices = self.collate(self.data_list)
-        torch.save((self.data, self.slices), self.processed_paths[0])
+        pass
 
 
-target = args.target
+target_list = args.target.split(',')
+target_str = '_'.join(target_list)
+
+for i in range(len(target_list)):
+    target_list[i] = int(target_list[i])
 set_seed(args.seed)
 
-targets = ['mu (D)', 'a (a^3_0)', 'e_HOMO (eV)', 'e_LUMO (eV)', 'delta e (eV)', 'R^2 (a^2_0)', 'ZPVE (eV)', 'U_0 (eV)', 'U (eV)', 'H (eV)', 'G (eV)', 'c_v (cal/mol.K)', ]
-scale = 1.0
-#Change the unit from meV to eV for energy-related targets
-if target in [2, 3, 4, 6, 7, 8, 9, 10]:
-    scale = 1000.0
+targets = ['mu (D)', 'a (a^3_0)', 'e_HOMO (eV)', 'e_LUMO (eV)', 'delta e (eV)', 'R^2 (a^2_0)', 'ZPVE (eV)', 'U_0 (eV)', 'U (eV)', 'H (eV)', 'G (eV)', 'c_v (cal/mol.K)']
+
+class MyTransform(object):
+    def __call__(self, data):
+        for target in target_list:
+            scale = 1.0
+            # Change the unit from meV to eV for energy-related targets
+            if target in [2, 3, 4, 6, 7, 8, 9, 10]:
+                scale = 1000.0
+            data.y[:, target] = data.y[:, target] / scale
+
+        data.y = data.y[:, target_list]
+        return data
 
 def test(loader):
     error = 0
@@ -120,14 +105,10 @@ def test(loader):
     for data in loader:
         data = data.to(device)
         output = model(data.x, data.edge_index, data.batch)
-        error += (output - data.y).abs().sum().item()
+        for i in range(len(target_list)):
+            error += (output[i] - data.y[:, i]).abs().sum().item()
     ema.resume(model)
-    return error / len(loader.dataset)
-
-class MyTransform(object):
-    def __call__(self, data):
-        data.y = data.y[:, target] / scale
-        return data
+    return error / len(loader.dataset) / len(target_list)
 
 # Load dataset
 path = osp.join('.', 'data')
@@ -148,7 +129,7 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=Tru
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
-print('Loaded the QM9 dataset. Target property: ', targets[target])
+print('Loaded the QM9 dataset. Target property: ', target_str)
 
 # Load model
 config = Config(dim=args.dim, n_layer=args.n_layer, cutoff=args.cutoff)
@@ -180,7 +161,9 @@ for epoch in range(args.epochs):
         optimizer.zero_grad()       # Init grad
 
         output = model(data.x, data.edge_index, data.batch)
-        loss = F.l1_loss(output, data.y)        # calculate loss
+        loss = 0
+        for i in range(len(target_list)):
+            loss += F.l1_loss(output[i], data.y[:, i])        # calculate loss
         loss_all += loss.item() * data.num_graphs
         loss.backward()         # calculate gradients
         clip_grad_norm_(model.parameters(), max_norm=1000, norm_type=2) #
@@ -216,4 +199,4 @@ torch.save({'state_dict': model.state_dict(),
             'dim': args.dim,
             'batch_size': args.batch_size,
             'cutoff': args.cutoff},
-           f'QM9_{targets[target]}.pt')
+           f'QM9_{target_str}.pt')

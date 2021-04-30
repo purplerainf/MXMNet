@@ -82,9 +82,12 @@ class Local_MP(torch.nn.Module):
         self.lin_rbf_out = nn.Linear(self.dim, self.dim, bias=False)
 
         self.h_mlp = MLP([self.dim, self.dim])
-
-        self.y_mlp = MLP([self.dim, self.dim, self.dim, self.dim])
-        self.y_W = nn.Linear(self.dim, 1)
+        self.y_mlp = torch.nn.ModuleList()
+        self.y_W = torch.nn.ModuleList()
+        self.n_y = config.n_y
+        for i in range(self.n_y):
+            self.y_mlp.append(MLP([self.dim, self.dim, self.dim, self.dim]))
+            self.y_W.append(nn.Linear(self.dim, 1))
 
     def forward(self, h, rbf, sbf1, sbf2, idx_kj, idx_ji_1, idx_jj, idx_ji_2, edge_index, num_nodes=None):
         res_h = h
@@ -127,7 +130,10 @@ class Local_MP(torch.nn.Module):
         h = self.res3(h)
 
         # Output Module
-        y = self.y_mlp(h)
-        y = self.y_W(y)
+        y = []
+        for i in range(self.n_y):
+            y.append(0)
+            y_temp = self.y_mlp[i](h)
+            y[i] = self.y_W[i](y_temp)
 
         return h, y

@@ -18,6 +18,7 @@ class Config(object):
         self.dim = dim
         self.n_layer = n_layer
         self.cutoff = cutoff
+        self.n_y = 2
 
 class MXMNet(nn.Module):
     def __init__(self, config: Config, num_spherical=7, num_radial=6, envelope_exponent=5):
@@ -27,7 +28,7 @@ class MXMNet(nn.Module):
         self.n_layer = config.n_layer
         self.cutoff = config.cutoff
 
-        self.embeddings = nn.Parameter(torch.ones((5, self.dim)))     # dim = 128 by default
+        self.embeddings = nn.Parameter(torch.ones((6, self.dim)))     # dim = 128 by default. 5x128 changed to 6x128 to add other atom
 
         self.rbf_l = BesselBasisLayer(16, 3.6179, envelope_exponent)
         self.rbf_g = BesselBasisLayer(16, self.cutoff, envelope_exponent)
@@ -46,7 +47,9 @@ class MXMNet(nn.Module):
         self.local_layers = torch.nn.ModuleList()
         for layer in range(config.n_layer):
             self.local_layers.append(Local_MP(config))
-        
+
+        self.n_y = config.n_y
+
         self.init()
 
     def init(self):
@@ -152,13 +155,20 @@ class MXMNet(nn.Module):
         sbf_2 = self.sbf_2_mlp(sbf_2)
         
         # Perform the message passing schemes
-        node_sum = 0
+        node_sum = []
+        output = []
+        for i in range(self.n_y):
+            node_sum.append(0)
+            output.append(0)
 
         for layer in range(self.n_layer):
             h = self.global_layers[layer](h, rbf_g, edge_index_g)
             h, t = self.local_layers[layer](h, rbf_l, sbf_1, sbf_2, idx_kj, idx_ji, idx_jj, idx_ji_2, edge_index_l)
-            node_sum += t
+            for i in range(self.n_y):
+                node_sum[i] += t[i]
         
         # Readout
-        output = global_add_pool(node_sum, batch)
-        return output.view(-1)
+        for i in range(self.n_y):
+            output[i] = global_add_pool(node_sum[i], batch)
+            output[i] = output[i].view(-1)
+        return output
